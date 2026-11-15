@@ -707,7 +707,7 @@ function toggleAdminMode() {
         alert('Đã khóa chế độ Quản trị Sở (Admin). Giao diện đã trở về chế độ dành cho các trường nhập liệu.');
         return;
     }
-    const inputPass = prompt('Nhập mật khẩu Quản trị viên Sở GD&ĐT (Mặc định: SGD2026):');
+    const inputPass = prompt('Nhập mật khẩu Quản trị viên Sở GD&ĐT:');
     if (inputPass === null) return;
     if (inputPass === ADMIN_PASSWORD) {
         isAdminAuthenticated = true;
