@@ -476,11 +476,8 @@
                             </li>
                         </ol>
                         <div class="pt-3 border-t space-y-2">
-                            <div class="flex flex-wrap justify-between items-center gap-2">
-                                <span class="text-xs text-slate-700 font-semibold">Mật khẩu Admin hiện tại: <code id="lbl-admin-pass" class="bg-slate-200 px-1.5 py-0.5 rounded text-blue-900 font-bold">SGD2026</code></span>
-                                <button type="button" onclick="changeAdminPassword()" class="px-2.5 py-1 bg-slate-700 text-white hover:bg-slate-800 rounded text-xs font-semibold">
-                                    <i class="fas fa-key mr-1"></i> Đổi mật khẩu Admin
-                                </button>
+                            <div class="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900">
+                                <i class="fas fa-shield-alt mr-1"></i> <strong>Bảo mật mật khẩu Admin:</strong> Mật khẩu được lưu tại dòng đầu tiên (<code>ADMIN_SECRET</code>) trong file Google Apps Script của Sở. Thầy/Cô có thể đổi mật khẩu trực tiếp trong Apps Script và bấm Triển khai lại.
                             </div>
                             <div class="flex justify-between items-center pt-1">
                                 <span class="text-xs text-red-600 font-semibold">Vùng nguy hiểm (Chỉ Admin):</span>
@@ -523,10 +520,24 @@ const GAS_BACKEND_SOURCE = `/**
  * 6. Bấm "Triển khai", cấp quyền truy cập và copy đường link Web App (dạng https://script.google.com/macros/s/.../exec) dán vào trang Web HTML.
  */
 
+// MẬT KHẨU QUẢN TRỊ VIÊN SỞ GD&ĐT (Thầy/Cô đổi mật khẩu bí mật của riêng mình tại đây)
+const ADMIN_SECRET = "SgdThaiNguyen@2026#";
 const SHEET_NAME = "DuLieu_BaoCao_HSKT";
 
 function doGet(e) {
   try {
+    // Kiểm tra đăng nhập Admin từ xa (không lộ mật khẩu trong file HTML)
+    if (e && e.parameter && e.parameter.action === "verify_admin") {
+      const pass = e.parameter.pass || "";
+      if (pass === ADMIN_SECRET) {
+        return ContentService.createTextOutput(JSON.stringify({ status: "ok", verified: true }))
+          .setMimeType(ContentService.MimeType.JSON);
+      } else {
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", verified: false, message: "Mật khẩu không chính xác!" }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) {
@@ -575,12 +586,9 @@ function doPost(e) {
       sheet.setFrozenRows(1);
     }
 
-    // Mã bảo mật Admin trên Google Sheets (Thầy/Cô có thể đổi mã này tùy ý)
-    const ADMIN_SECRET = "SGD_TN_ADMIN_2026";
-
     if (payload.action === "clear_all") {
       if (payload.adminKey !== ADMIN_SECRET) {
-        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Sai mã bảo mật Admin!" }))
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Sai mật khẩu bảo mật Admin!" }))
           .setMimeType(ContentService.MimeType.JSON);
       }
       const lastRow = sheet.getLastRow();
@@ -591,7 +599,7 @@ function doPost(e) {
 
     if (payload.action === "bulk_seed") {
       if (payload.adminKey !== ADMIN_SECRET) {
-        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Sai mã bảo mật Admin!" }))
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Sai mật khẩu bảo mật Admin!" }))
           .setMimeType(ContentService.MimeType.JSON);
       }
       const items = payload.items || [];
@@ -675,10 +683,11 @@ const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('api')) {
     localStorage.setItem('sgd_gas_webapp_url', urlParams.get('api').trim());
 }
-let GAS_WEBAPP_URL = localStorage.getItem('sgd_gas_webapp_url') || '';
+const DEFAULT_GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxLdwSRe0EvkCc2VB3yAjW97GXP13DAenbusP3O4_FLztEs92MjaAaD7CJF2I3jvNcZ/exec";
+let GAS_WEBAPP_URL = localStorage.getItem('sgd_gas_webapp_url') || DEFAULT_GAS_WEBAPP_URL;
 let submittedReports = JSON.parse(localStorage.getItem('sgd_hskt_reports_2026') || '{}');
-let ADMIN_PASSWORD = localStorage.getItem('sgd_admin_pass_2026') || 'SGD2026';
-let isAdminAuthenticated = sessionStorage.getItem('sgd_is_admin') === 'true';
+let sessionAdminKey = sessionStorage.getItem('sgd_admin_session_key') || '';
+let isAdminAuthenticated = Boolean(sessionAdminKey);
 
 function applyAdminUI() {
     document.querySelectorAll('.admin-only').forEach(el => {
@@ -694,42 +703,68 @@ function applyAdminUI() {
             authBtn.innerHTML = '<i class="fas fa-lock mr-1"></i> Quản trị Sở (Admin)';
         }
     }
-    const lblPass = document.getElementById('lbl-admin-pass');
-    if (lblPass) lblPass.innerText = ADMIN_PASSWORD;
 }
 
-function toggleAdminMode() {
+async function toggleAdminMode() {
     if (isAdminAuthenticated) {
         isAdminAuthenticated = false;
-        sessionStorage.removeItem('sgd_is_admin');
+        sessionAdminKey = '';
+        sessionStorage.removeItem('sgd_admin_session_key');
         applyAdminUI();
         switchView('school');
         alert('Đã khóa chế độ Quản trị Sở (Admin). Giao diện đã trở về chế độ dành cho các trường nhập liệu.');
         return;
     }
-    const inputPass = prompt('Nhập mật khẩu Quản trị viên Sở GD&ĐT:');
-    if (inputPass === null) return;
-    if (inputPass === ADMIN_PASSWORD) {
-        isAdminAuthenticated = true;
-        sessionStorage.setItem('sgd_is_admin', 'true');
-        applyAdminUI();
-        alert('Đăng nhập Quản trị Sở (Admin) thành công! Đã mở khóa các chức năng Thống kê, Đôn đốc và Cấu hình.');
-    } else {
-        alert('Mật khẩu không chính xác! Chỉ cán bộ Sở GD&ĐT mới có quyền truy cập khu vực này.');
-    }
-}
 
-function changeAdminPassword() {
-    if (!isAdminAuthenticated) return;
-    const newPass = prompt('Nhập mật khẩu Admin mới (tối thiểu 4 ký tự):', ADMIN_PASSWORD);
-    if (!newPass || newPass.trim().length < 4) {
-        if (newPass !== null) alert('Mật khẩu phải có ít nhất 4 ký tự!');
+    // Nếu chạy offline trên máy cá nhân (chưa gắn link Google Sheets), cho phép tự đặt mật khẩu cục bộ
+    if (!GAS_WEBAPP_URL) {
+        let localPass = localStorage.getItem('sgd_local_admin_pass');
+        if (!localPass) {
+            const setPass = prompt('Hệ thống chưa gắn link Google Sheets. Vui lòng thiết lập mật khẩu Quản trị viên cho máy này (tối thiểu 6 ký tự):');
+            if (!setPass || setPass.trim().length < 6) {
+                if (setPass !== null) alert('Mật khẩu phải có ít nhất 6 ký tự!');
+                return;
+            }
+            localPass = setPass.trim();
+            localStorage.setItem('sgd_local_admin_pass', localPass);
+        }
+        const inputPass = prompt('Nhập mật khẩu Quản trị viên Sở GD&ĐT:');
+        if (inputPass === null) return;
+        if (inputPass === localPass) {
+            sessionAdminKey = localPass;
+            isAdminAuthenticated = true;
+            sessionStorage.setItem('sgd_admin_session_key', sessionAdminKey);
+            applyAdminUI();
+            alert('Đăng nhập Quản trị Sở (Admin) thành công!');
+        } else {
+            alert('Mật khẩu không chính xác!');
+        }
         return;
     }
-    ADMIN_PASSWORD = newPass.trim();
-    localStorage.setItem('sgd_admin_pass_2026', ADMIN_PASSWORD);
-    applyAdminUI();
-    alert('Đã đổi mật khẩu Admin thành công! Mật khẩu mới là: ' + ADMIN_PASSWORD);
+
+    // Khi đã kết nối Google Sheets: Xác thực mật khẩu trực tiếp trên máy chủ Google Apps Script
+    const inputPass = prompt('Nhập mật khẩu Quản trị viên Sở GD&ĐT:');
+    if (inputPass === null || !inputPass.trim()) return;
+
+    setLoading(true, 'Đang xác thực quyền Quản trị viên với máy chủ Sở GD&ĐT...');
+    try {
+        const verifyUrl = `${GAS_WEBAPP_URL}?action=verify_admin&pass=${encodeURIComponent(inputPass.trim())}`;
+        const resp = await fetch(verifyUrl);
+        const json = await resp.json();
+        if (json.status === 'ok' && json.verified) {
+            sessionAdminKey = inputPass.trim();
+            isAdminAuthenticated = true;
+            sessionStorage.setItem('sgd_admin_session_key', sessionAdminKey);
+            applyAdminUI();
+            alert('Xác thực Quản trị Sở (Admin) thành công!');
+        } else {
+            alert('Mật khẩu không chính xác! Chỉ cán bộ Sở GD&ĐT mới có quyền truy cập khu vực này.');
+        }
+    } catch (err) {
+        alert('Lỗi kết nối khi xác thực Admin: ' + err.message);
+    } finally {
+        setLoading(false);
+    }
 }
 
 function getSchoolId(level, name) {
@@ -802,10 +837,11 @@ async function saveGasUrl() {
     const url = document.getElementById('inp-gas-url').value.trim();
     const statusEl = document.getElementById('gas-test-status');
     if (!url) {
-        GAS_WEBAPP_URL = '';
+        GAS_WEBAPP_URL = DEFAULT_GAS_WEBAPP_URL;
         localStorage.removeItem('sgd_gas_webapp_url');
+        document.getElementById('inp-gas-url').value = GAS_WEBAPP_URL;
         updateCloudBadge();
-        statusEl.innerHTML = '<span class="text-amber-700">Đã xóa liên kết Google Sheets. Hệ thống chuyển về lưu cục bộ trên trình duyệt.</span>';
+        statusEl.innerHTML = '<span class="text-emerald-700">Đã khôi phục liên kết Google Sheets mặc định của Sở GD&ĐT.</span>';
         return;
     }
     if (!url.startsWith('https://script.google.com/')) {
@@ -821,14 +857,9 @@ async function saveGasUrl() {
 }
 
 function copyShareLink() {
-    if (!GAS_WEBAPP_URL) {
-        alert('Thầy/Cô vui lòng dán và lưu URL Google Apps Script Web App trước khi copy link gửi các trường!');
-        return;
-    }
-    const baseUrl = window.location.href.split('?')[0];
-    const shareUrl = `${baseUrl}?api=${encodeURIComponent(GAS_WEBAPP_URL)}`;
-    navigator.clipboard.writeText(shareUrl).then(() => {
-        alert('Đã copy đường link có gắn sẵn kết nối Google Sheets! Thầy/Cô chỉ cần gửi link này (sau khi đưa file HTML lên Vercel/GitHub Pages/Google Drive) cho 543 trường là các trường nhập trực tiếp được ngay.');
+    const cleanUrl = window.location.href.split('?')[0];
+    navigator.clipboard.writeText(cleanUrl).then(() => {
+        alert('Đã copy đường link chính thức (' + cleanUrl + ')! Hệ thống đã gắn sẵn kết nối Google Sheets bên trong, thầy/cô chỉ cần gửi link này cho 543 trường là nhập được ngay.');
     });
 }
 
@@ -1618,7 +1649,7 @@ async function seedDemoData() {
                 method: 'POST',
                 mode: 'no-cors',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: 'bulk_seed', adminKey: 'SGD_TN_ADMIN_2026', items: items })
+                body: JSON.stringify({ action: 'bulk_seed', adminKey: sessionAdminKey, items: items })
             });
             await new Promise(r => setTimeout(r, 1500));
             await syncFromGoogleSheets(false);
@@ -1637,8 +1668,9 @@ async function clearAllData() {
         return;
     }
     const verifyPass = prompt('XÁC NHẬN BẢO MẬT: Nhập lại mật khẩu Admin để xóa toàn bộ dữ liệu:');
-    if (verifyPass !== ADMIN_PASSWORD) {
-        if (verifyPass !== null) alert('Sai mật khẩu xác nhận! Hủy thao tác xóa dữ liệu.');
+    if (verifyPass === null) return;
+    if (verifyPass.trim() !== sessionAdminKey) {
+        alert('Sai mật khẩu xác nhận! Hủy thao tác xóa dữ liệu.');
         return;
     }
     if (confirm('CẢNH BÁO CUỐI CÙNG: Toàn bộ dữ liệu báo cáo của 543 trường trên Google Sheets và máy sẽ bị xóa vĩnh viễn. Tiếp tục?')) {
@@ -1651,7 +1683,7 @@ async function clearAllData() {
                     method: 'POST',
                     mode: 'no-cors',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action: 'clear_all', adminKey: 'SGD_TN_ADMIN_2026' })
+                    body: JSON.stringify({ action: 'clear_all', adminKey: sessionAdminKey })
                 });
             } finally {
                 setLoading(false);
